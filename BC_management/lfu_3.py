@@ -27,24 +27,31 @@ class LFU(Cache):
         # segment) for buffers having that counter in the right part of the buffers for effective pop() lfru buffer
         self.min_counter = 1
 
+    def access_buffer(self, buffer):
+        reversed_buffer_index = self.buffers.index(buffer)
+        buffers_len = len(self.buffers)
+        buffer_index = buffers_len - reversed_buffer_index - 1
+        if buffer_index >= self.left_len:
+            if buffer_index >= self.left_len + self.middle_len:
+                print(f"CACHE: Buffer for sector {buffer.sector} on track {buffer.track} is in the right segment")
+                self.right_counter_map[buffer.counter].remove((buffer.track, buffer.sector))
+                self._add_next_to_right_counter_map()
+                if buffer.counter == self.min_counter and len(self.right_counter_map[buffer.counter]) == 0:
+                    self.right_counter_map.pop(buffer.counter)
+                    self.min_counter = min(self.right_counter_map.keys())
+            else:
+                print(f"CACHE: Buffer for sector {buffer.sector} on track {buffer.track} is in the middle segment")
+            buffer.counter += 1
+        else:
+            print(f"CACHE: Buffer for sector {buffer.sector} on track {buffer.track} is in the left segment")
+        self.buffers.pop(reversed_buffer_index)
+        self.buffers.append(buffer)
+
     def get(self, track, sector):
         buffer = self.buffers_map.get((track, sector))
         if buffer:
             print(f"CACHE: Buffer for sector {sector} on track {track} found in cache. Reading content.")
-            reversed_buffer_index = self.buffers.index(buffer)
-            if reversed_buffer_index >= self.left_len:
-                if reversed_buffer_index >= self.left_len+self.middle_len:
-                    print(f"CACHE: Buffer for sector {sector} on track {track} is in the right segment")
-                    self.right_counter_map[buffer.counter].remove((track, sector))
-                    if buffer.counter == self.min_counter and len(self.right_counter_map[buffer.counter]) == 0:
-                        self.right_counter_map.pop(buffer.counter)
-                        self.min_counter = min(self.right_counter_map.keys())
-                buffer.counter += 1
-                print(f"CACHE: Buffer for sector {sector} on track {track} is in the middle segment")
-            else:
-                print(f"CACHE: Buffer for sector {sector} on track {track} is in the left segment")
-            self.buffers.pop(reversed_buffer_index)
-            self.buffers.append(buffer)
+            self.access_buffer(buffer)
             return buffer.data
         print(f"CACHE: Buffer for sector {sector} on track {track} not found in cache")
         return None
@@ -61,6 +68,7 @@ class LFU(Cache):
         if buffer:
             print(f"CACHE: Buffer for sector {sector} on track {track} found in cache. Modifying content.")
             buffer.data.content = data
+            self.access_buffer(buffer)
             return None
         print(f"CACHE: Inserting to the cache new buffer for sector {sector} on track {track}")
         buffers_len = len(self.buffers)
@@ -76,7 +84,7 @@ class LFU(Cache):
             popped_buffer = self.buffers_map.pop((lfru_track, lfru_sector))
             self.buffers.remove(popped_buffer)
             self.right_counter_map[self.min_counter].popleft()
-            if self.right_counter_map[self.min_counter] == 0:
+            if len(self.right_counter_map[self.min_counter]) == 0:
                 self.right_counter_map.pop(self.min_counter)
                 self.min_counter = min(self.right_counter_map.keys())
             self._add_next_to_right_counter_map()
@@ -99,8 +107,9 @@ class LFU(Cache):
             print(f"CACHE: Remove buffer for sector {sector} on track {track} from cache")
             popped_buffer = self.buffers_map.pop((track, sector))
             reversed_buffer_index = self.buffers.index(popped_buffer)
+            buffer_index = len(self.buffers) - reversed_buffer_index - 1
             del self.buffers[reversed_buffer_index]
-            if reversed_buffer_index >= self.left_len+self.middle_len:
+            if buffer_index >= self.left_len+self.middle_len:
                 self.right_counter_map[popped_buffer.counter].remove((track, sector))
             return popped_buffer.data
         return None

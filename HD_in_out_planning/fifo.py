@@ -1,4 +1,4 @@
-from interface import DiskSchedAlg
+from HD_in_out_planning.interface import DiskSchedAlg
 from collections import deque
 
 
@@ -10,9 +10,14 @@ class Fifo(DiskSchedAlg):
         self.queue.append(request)
 
     def get_next(self):
-        return self.queue.popleft()
+        if len(self.queue) != 0:
+            return self.queue.popleft()
+        return None
 
     def is_scheduled(self, request: (str, (int, int))) -> bool:
         if request in self.queue:
             return True
         return False
+
+    def print_state(self):
+        print(f"FIFO: Current queue\n\t{list(self.queue)}")

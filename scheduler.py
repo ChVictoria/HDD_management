@@ -74,22 +74,28 @@ class Scheduler:
         in_out_name = 'READ' if in_out_type == 'r' else 'WRITE'
         print(f"SCHEDULER: Completed I/O ({in_out_name}) for buffer {waiting_buffer}")
         if in_out_type == 'r':
-            self.cache.put(data="some data", *waiting_buffer)
+            popped_buffer = self.cache.put(data="some data", *waiting_buffer)
+            if popped_buffer is not None:
+                popped_request = ("w", (popped_buffer.track, popped_buffer.sector))
+                self.disk_scheduler.put(popped_request)
+
+            waking_up_processes = []
+            for context in self.sleepQ:
+                if context.process.requests[0] == self.next_int.request:
+                    waking_up_processes.append(context)
+            for context in waking_up_processes:
+                self.wake_up_process(context)
+
         if self.flushing_cache:
             self.cache.pop(*self.next_int.request[1])
         self.cache.print_cache()
-        for context in self.sleepQ:
-            if context.process.requests[0] == self.next_int.request:
-                self.wake_up_process(context)
-                if self.next_int.request[0] == 'w':
-                    break
+
         next_request = self.disk_scheduler.get_next()
         self.disk_scheduler.print_state()
         if next_request:
             self.handle_next_request(next_request)
         else:
             self.next_int = None
-
 
     def execute_next_process(self):
         quantum_time_left = sched_cnf.QUANTUM_TIME
@@ -124,25 +130,26 @@ class Scheduler:
                             self.timestamp += quantum_time_left
                             mode = "User" if context.cur_mode == OSMode.user else "Kernel"
                             print(f"SCHEDULER: ... worked for {quantum_time_left} us in {mode} mode")
-                            return
+                            break
                         else:
                             context.event_time_left -= time_to_int
-                            print(f"SCHEDULER: ... worked for {time_to_int}")
+                            print(f"SCHEDULER: ... worked for {time_to_int} us")
                             self.timestamp += time_to_int
                             quantum_time_left -= time_to_int
                             print("SCHEDULER: Interrupt from disk")
-                            if time_to_int + self.next_int.time_left > quantum_time_left:
+                            if self.next_int.time_left > quantum_time_left:
                                 self.timestamp += quantum_time_left
                                 print(f"SCHEDULER: ... worked for {quantum_time_left} us in interrupt handler")
                                 self.next_int.timestamp = self.timestamp
                                 self.next_int.time_left -= quantum_time_left
-                                return
+                                break
                             else:
                                 int_time_left = self.next_int.time_left
                                 self.handle_interrupt()
                                 self.timestamp += int_time_left
                                 quantum_time_left -= int_time_left
                                 print(f"SCHEDULER: ... worked for {int_time_left} us in interrupt handler")
+                                continue
 
                 # working in event
                 if context.event_time_left != 0:
@@ -151,7 +158,7 @@ class Scheduler:
                         self.timestamp += quantum_time_left
                         mode = "User" if context.cur_mode == OSMode.user else "Kernel"
                         print(f"SCHEDULER: ... worked for {quantum_time_left} us in {mode} mode")
-                        return
+                        break
                     else:
                         self.timestamp += context.event_time_left
                         quantum_time_left -= context.event_time_left
@@ -165,8 +172,11 @@ class Scheduler:
                         match request[0]:
                             case "r":
                                 buffer = self.cache.get(request[1][0], request[1][1])
+                                self.cache.print_cache()
                                 if buffer is None:
                                     if self.next_int is None:
+                                        self.disk_scheduler.put(request)
+                                        request = self.disk_scheduler.get_next()
                                         self.handle_next_request(request)
                                     else:
                                         if self.next_int.request == request:
@@ -187,6 +197,7 @@ class Scheduler:
                                     continue
                             case "w":
                                 popped_buffer = self.cache.put(request[1][0], request[1][1], "some data")
+                                self.cache.print_cache()
                                 if popped_buffer is not None:
                                     popped_request = ("w", (popped_buffer.track, popped_buffer.sector))
                                     if self.next_int is None:
@@ -218,6 +229,7 @@ class Scheduler:
                     print(f"SCHEDULER: Process {self.runQ[0].process.name} exited")
                     self.runQ.pop(0)
                     return
+        self.runQ.append(self.runQ.pop(0))
 
     def flush_cache(self):
         cached_buffers = self.cache.list_buffers()
@@ -225,6 +237,7 @@ class Scheduler:
         self.handle_next_request(("w", first_buffer))
         for track, sector in cached_buffers:
             self.disk_scheduler.put(("w", (track, sector)))
+        self.disk_scheduler.print_state()
 
     def start(self):
         while True:
@@ -248,6 +261,5 @@ class Scheduler:
                     print("SCHEDULER: Have nothing to do, exit")
                     exit()
             else:
-                self.runQ.append(self.runQ.pop(0))
                 self.execute_next_process()
             print()

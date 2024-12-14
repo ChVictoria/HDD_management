@@ -1,5 +1,5 @@
-from interface import DiskSchedAlg
-from look import Look, LookDirection
+from HD_in_out_planning.interface import DiskSchedAlg
+from HD_in_out_planning.look import Look, LookDirection
 
 
 class FLook(DiskSchedAlg):
